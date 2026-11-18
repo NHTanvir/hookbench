@@ -449,9 +449,7 @@ export async function startReferenceServer(opts = {}) {
             throw new Failure(ERROR.InvalidParams, `delivery.secret is invalid: ${problem}`);
         await checkCallback(url);
         const urlString = delivery["url"];
-        let key = createHash("sha256").update(canonical([principal, urlString, name, args])).digest("hex");
-        if (has("non-idempotent-subscribe"))
-            key += `:${randomUUID()}`;
+        const key = createHash("sha256").update(canonical([principal, urlString, name, args])).digest("hex");
         const id = `sub_${key.slice(0, 16)}`;
         const refreshBefore = grant(params["ttlMs"]);
         const existing = webhookSubs.get(key);
@@ -466,6 +464,9 @@ export async function startReferenceServer(opts = {}) {
             }
             existing.refreshBefore = refreshBefore;
             existing.active = true;
+            // The fault: a refresh hands out a new id (deliveries follow it), so the upsert is not idempotent.
+            if (has("non-idempotent-subscribe"))
+                existing.id = `sub_${randomBytes(8).toString("hex")}`;
             const result = {
                 id: existing.id,
                 refreshBefore: refreshBefore === null ? null : new Date(refreshBefore).toISOString(),

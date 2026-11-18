@@ -1,0 +1,46 @@
+{
+  "name": "@nhtanvir/hookbench",
+  "version": "0.1.0",
+  "description": "Local test bench and mock client for MCP Events (SEP-3415).",
+  "license": "MIT",
+  "author": "NHTanvir",
+  "homepage": "https://github.com/NHTanvir/hookbench#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NHTanvir/hookbench.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NHTanvir/hookbench/issues"
+  },
+  "type": "module",
+  "bin": {
+    "hookbench": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build && npm run build:test && node --test --test-concurrency=1 build/tests/",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "demo": "node dist/cli.js demo"
+  },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "typescript": "5.9.3"
+  }
+}

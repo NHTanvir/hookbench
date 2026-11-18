@@ -55,6 +55,21 @@ describe("cli: check", () => {
     });
   });
 
+  it("picks the --output format from the file extension", async () => {
+    await withServer({}, async (server) => {
+      const json = join(tmp, "r.json");
+      const md = join(tmp, "r.md");
+      const txt = join(tmp, "r.txt");
+      const base = ["check", server.url, "-H", "Authorization: Bearer hookbench-dev", "--allow-loopback", "--no-color", "--quiet", "--stream-watch", "2500"];
+      assert.equal(await main([...base, "--output", json], fakeIo().io), 0);
+      assert.equal(JSON.parse(readFileSync(json, "utf8")).passed, true);
+      assert.equal(await main([...base, "--output", md], fakeIo().io), 0);
+      assert.match(readFileSync(md, "utf8"), /^### ✅ MCP Events conformance: passed/);
+      assert.equal(await main([...base, "--output", txt], fakeIo().io), 0);
+      assert.match(readFileSync(txt, "utf8"), /^hookbench check/);
+    });
+  });
+
   it("exits 1 when a MUST fails, and on warnings with --strict", async () => {
     await withServer({ faults: ["ignore-mcp-name"] }, async (server) => {
       const f = fakeIo();

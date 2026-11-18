@@ -25,7 +25,7 @@ Options
   --delivery-wait <ms>      how long to wait for a delivery after a trigger (default 5000)
   --stream-watch <ms>       longest time to watch a push stream for heartbeats (default 5000)
   --format <f>              text (default), json or markdown
-  --output <file>           also write the report to a file (format from --format)
+  --output <file>           also write the report to a file: .json, .md, or text for anything else
   --summary <file>          append the Markdown report to a file, e.g. "$GITHUB_STEP_SUMMARY"
   --strict                  exit 1 on SHOULD warnings too
   --no-color                no ANSI colour
@@ -81,7 +81,13 @@ export async function runCheckCommand(argv: string[], io: Io = defaultIo): Promi
   const rendered = format === "json" ? formatJson(report) : format === "markdown" ? formatMarkdown(report) : formatText(report, color);
   io.out.write(`${rendered}\n`);
   const output = flagString(args, "output");
-  if (output) writeFileSync(output, format === "text" ? formatText(report, false) : rendered);
+  if (output) {
+    // The file's extension picks its format, so CI can log text and keep a JSON report.
+    const ext = output.toLowerCase().split(".").pop();
+    const body =
+      ext === "json" ? formatJson(report) : ext === "md" || ext === "markdown" ? formatMarkdown(report) : format === "text" ? formatText(report, false) : rendered;
+    writeFileSync(output, `${body}\n`);
+  }
   const summary = flagString(args, "summary");
   if (summary) appendFileSync(summary, `${formatMarkdown(report)}\n`);
   return exitCodeFor(report, flagBool(args, "strict"));

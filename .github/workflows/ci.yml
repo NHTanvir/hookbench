@@ -30,3 +30,50 @@ jobs:
         run: |
           npm run build
           git diff --exit-code -- dist/ || { echo "::error::dist/ is stale: run npm run build and commit it"; exit 1; }
+
+  action:
+    name: GitHub Action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Start a compliant reference server and a broken one
+        run: |
+          node dist/cli.js serve --port 4100 --allow-loopback-callbacks --quiet &
+          node dist/cli.js serve --port 4101 --allow-loopback-callbacks --quiet --fault sign-with-literal-secret &
+          for port in 4100 4101; do
+            for i in $(seq 1 50); do curl -sf "http://127.0.0.1:$port/hookbench" > /dev/null && break; sleep 0.2; done
+          done
+      - name: Passes the compliant server
+        id: good
+        uses: ./
+        with:
+          url: http://127.0.0.1:4100/mcp
+          headers: |
+            Authorization: Bearer hookbench-dev
+          allow-loopback: "true"
+      - name: Fails the server that signs webhooks with the literal secret
+        id: broken
+        continue-on-error: true
+        uses: ./
+        with:
+          url: http://127.0.0.1:4101/mcp
+          headers: |
+            Authorization: Bearer hookbench-dev
+          allow-loopback: "true"
+      - name: The outputs say so
+        env:
+          GOOD_PASSED: ${{ steps.good.outputs.passed }}
+          GOOD_FAILURES: ${{ steps.good.outputs.failures }}
+          BROKEN_OUTCOME: ${{ steps.broken.outcome }}
+          BROKEN_EXIT: ${{ steps.broken.outputs.exit-code }}
+          BROKEN_FAILURES: ${{ steps.broken.outputs.failures }}
+          REPORT: ${{ steps.broken.outputs.report }}
+        run: |
+          echo "good: passed=$GOOD_PASSED failures=$GOOD_FAILURES"
+          echo "broken: outcome=$BROKEN_OUTCOME exit-code=$BROKEN_EXIT failures=$BROKEN_FAILURES"
+          test "$GOOD_PASSED" = "true" && test "$GOOD_FAILURES" = "0"
+          test "$BROKEN_OUTCOME" = "failure" && test "$BROKEN_EXIT" = "1" && test "$BROKEN_FAILURES" = "1"
+          node -e 'const r = require(process.argv[1]); const f = r.results.find((x) => x.status === "fail"); console.log(f.id + ": " + f.detail); if (f.id !== "delivery.signature") process.exit(1);' "$REPORT"

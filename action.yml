@@ -1,0 +1,118 @@
+name: MCP Events Conformance Test (SEP-3415)
+description: "Fail CI when your MCP server breaks MCP Events: SEP-3415 and ChatGPT checks for poll, push and signed Standard Webhooks"
+author: NHTanvir
+
+branding:
+  icon: radio
+  color: purple
+
+inputs:
+  url:
+    description: The MCP endpoint to test, for example http://127.0.0.1:3000/mcp. Start your server in an earlier step.
+    required: true
+  headers:
+    description: >-
+      Headers to send on every request, one "Name: value" per line. Webhook mode needs an
+      authenticated principal, for example "Authorization: Bearer <token>" from a secret.
+    required: false
+    default: ""
+  profile:
+    description: sep-3415 (the spec, the default) or chatgpt (the dialect in OpenAI's MCP Events guide).
+    required: false
+    default: sep-3415
+  trigger-url:
+    description: >-
+      A dev-only endpoint that makes your server emit a test event when Hookbench POSTs
+      {"name": "<event>", "data": {...}} to it. It turns on the occurrence and delivery rules.
+    required: false
+    default: ""
+  callback-url:
+    description: A public https URL that forwards to Hookbench's webhook receiver on port 4300, to test real deliveries on a strict server.
+    required: false
+    default: ""
+  allow-loopback:
+    description: Set to "true" when your server accepts http://127.0.0.1 webhook callbacks in this environment on purpose.
+    required: false
+    default: "false"
+  strict:
+    description: Set to "true" to fail on SHOULD warnings as well as MUST failures.
+    required: false
+    default: "false"
+  timeout:
+    description: Per-request timeout, in milliseconds.
+    required: false
+    default: "10000"
+  delivery-wait:
+    description: How long to wait for a delivery after triggering an event, in milliseconds.
+    required: false
+    default: "5000"
+  stream-watch:
+    description: Longest time to watch a push stream for heartbeats, in milliseconds.
+    required: false
+    default: "5000"
+
+outputs:
+  passed:
+    description: '"true" when no MUST requirement failed, otherwise "false".'
+    value: ${{ steps.check.outputs.passed }}
+  failures:
+    description: Number of rules that failed.
+    value: ${{ steps.check.outputs.failures }}
+  warnings:
+    description: Number of SHOULD rules that warned.
+    value: ${{ steps.check.outputs.warnings }}
+  exit-code:
+    description: 0 when the server passed, 1 when it failed, 2 for a usage error.
+    value: ${{ steps.check.outputs.exit-code }}
+  report:
+    description: Path to the JSON report, with every rule's status and the reason.
+    value: ${{ steps.check.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: MCP Events conformance test (hookbench check)
+      id: check
+      shell: bash
+      env:
+        HB_CLI: ${{ github.action_path }}/dist/cli.js
+        HB_URL: ${{ inputs.url }}
+        HB_HEADERS: ${{ inputs.headers }}
+        HB_PROFILE: ${{ inputs.profile }}
+        HB_TRIGGER: ${{ inputs.trigger-url }}
+        HB_CALLBACK: ${{ inputs.callback-url }}
+        HB_LOOPBACK: ${{ inputs.allow-loopback }}
+        HB_STRICT: ${{ inputs.strict }}
+        HB_TIMEOUT: ${{ inputs.timeout }}
+        HB_DELIVERY_WAIT: ${{ inputs.delivery-wait }}
+        HB_STREAM_WATCH: ${{ inputs.stream-watch }}
+      run: |
+        report="$RUNNER_TEMP/hookbench-report.json"
+        args=(check "$HB_URL" --profile "$HB_PROFILE" --no-color --quiet
+              --timeout "$HB_TIMEOUT" --delivery-wait "$HB_DELIVERY_WAIT" --stream-watch "$HB_STREAM_WATCH"
+              --output "$report")
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then args+=(--summary "$GITHUB_STEP_SUMMARY"); fi
+        while IFS= read -r line || [ -n "$line" ]; do
+          line="${line%$'\r'}"
+          if [ -n "${line//[[:space:]]/}" ]; then args+=(--header "$line"); fi
+        done <<< "$HB_HEADERS"
+        if [ -n "$HB_TRIGGER" ]; then args+=(--trigger-url "$HB_TRIGGER"); fi
+        if [ -n "$HB_CALLBACK" ]; then args+=(--callback-url "$HB_CALLBACK" --receiver-port 4300); fi
+        if [ "$HB_LOOPBACK" = "true" ]; then args+=(--allow-loopback); fi
+        if [ "$HB_STRICT" = "true" ]; then args+=(--strict); fi
+
+        set +e
+        node "$HB_CLI" "${args[@]}"
+        status=$?
+        set -e
+
+        {
+          echo "exit-code=$status"
+          echo "report=$report"
+        } >> "$GITHUB_OUTPUT"
+        if [ -f "$report" ]; then
+          node -e 'const r = require(process.argv[1]); console.log(`passed=${r.passed}`); console.log(`failures=${r.summary.fail}`); console.log(`warnings=${r.summary.warn}`);' "$report" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+        exit "$status"

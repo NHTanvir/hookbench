@@ -5,13 +5,73 @@
 [![Node.js 18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
 [![MCP Events: SEP-3415](https://img.shields.io/badge/MCP%20Events-SEP--3415-6f42c1.svg)](docs/what-is-mcp-events.md)
 
-**Hookbench is a local test bench and mock client for MCP Events, the Model Context Protocol extension (SEP-3415) that lets an MCP server tell clients when something happens.** It subscribes to your MCP server the way ChatGPT or an agent SDK would. It shows every delivered event in a live inspector, and checks your `events/list`, `events/poll`, `events/stream`, `events/subscribe` and `events/unsubscribe` against the spec. You can build an event-emitting MCP server without ChatGPT, an agent or a public URL.
+**Hookbench is a local test bench and mock client for MCP Events, the Model Context Protocol extension (SEP-3415) that lets an MCP server tell clients when something happens.** It subscribes to your MCP server the way ChatGPT or an agent SDK would. It shows every delivered event in a live inspector, and checks your `events/list`, `events/poll`, `events/stream`, `events/subscribe` and `events/unsubscribe` against the spec, on your machine or in CI as a GitHub Action. You can build an event-emitting MCP server without ChatGPT, an agent or a public URL.
 
 ```bash
 npx github:NHTanvir/hookbench demo
 ```
 
 That one command runs the whole loop offline. It starts a bundled reference MCP server and a mock consumer that subscribes in all three delivery modes (webhook, poll and push), and opens the inspector at `http://127.0.0.1:4400`. It needs Node.js 18 or newer and has no runtime dependencies.
+
+## How do I test MCP Events in CI?
+
+Add the **MCP Events Conformance Test (SEP-3415)** GitHub Action after the step that starts your MCP server. It runs `hookbench check`, which grades 35 conformance rules. It fails the job when a MUST requirement of SEP-3415 breaks, and names the fix for every failure:
+
+```yaml
+- name: MCP Events conformance test
+  uses: NHTanvir/hookbench@v0.1.0
+  with:
+    url: http://127.0.0.1:3000/mcp
+    headers: |
+      Authorization: Bearer ${{ secrets.MCP_TOKEN }}
+```
+
+A complete workflow:
+
+```yaml
+name: MCP Events
+on: [push, pull_request]
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Start the MCP server
+        run: npm start &
+      - name: MCP Events conformance test
+        uses: NHTanvir/hookbench@v0.1.0
+        with:
+          url: http://127.0.0.1:3000/mcp
+          headers: |
+            Authorization: Bearer ${{ secrets.MCP_TOKEN }}
+          # optional: a dev-only endpoint that makes your server emit a test event
+          trigger-url: http://127.0.0.1:3000/dev/emit
+```
+
+The Markdown report goes to the job summary, and the JSON report is the `report` output.
+
+| Input | Default | What it does |
+| --- | --- | --- |
+| `url` | (required) | the MCP endpoint to test |
+| `headers` | | one `Name: value` per line; webhook mode needs credentials |
+| `profile` | `sep-3415` | `sep-3415`, or `chatgpt` for ChatGPT's dialect |
+| `trigger-url` | | a dev endpoint that emits a test event when Hookbench POSTs `{"name", "data"}`; turns on the delivery rules |
+| `callback-url` | | a public https URL forwarding to the receiver on port 4300, to test real deliveries on a strict server |
+| `allow-loopback` | `false` | `true` when your server accepts `http://127.0.0.1` callbacks in CI on purpose |
+| `strict` | `false` | `true` to fail on SHOULD warnings too |
+| `timeout`, `delivery-wait`, `stream-watch` | `10000`, `5000`, `5000` | timing, in milliseconds |
+
+| Output | Value |
+| --- | --- |
+| `passed` | `true` when no MUST requirement failed |
+| `failures`, `warnings` | rule counts |
+| `exit-code` | `0` pass, `1` fail, `2` usage error |
+| `report` | path to the JSON report |
 
 ## What does Hookbench do?
 
@@ -269,6 +329,10 @@ And six notifications:
 - `notifications/events/terminated`
 
 `events/subscribe` and `events/unsubscribe` are used only for webhook delivery. Poll and push need no subscribe step.
+
+### Is there a GitHub Action for MCP Events?
+
+Yes. [MCP Events Conformance Test (SEP-3415)](#how-do-i-test-mcp-events-in-ci) runs `hookbench check` in GitHub Actions: `uses: NHTanvir/hookbench@v0.1.0` with the URL of your MCP server. It fails the job on any MUST failure and writes the report to the job summary.
 
 ### Can I test MCP Events without ChatGPT?
 

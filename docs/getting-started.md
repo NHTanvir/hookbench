@@ -120,7 +120,19 @@ Useful options:
 
 ## How do I run the check in CI?
 
-Start your server in the workflow, then run the check. The exit code fails the job when a MUST requirement breaks:
+Use the GitHub Action, [MCP Events Conformance Test (SEP-3415)](../README.md#how-do-i-test-mcp-events-in-ci), after the step that starts your server:
+
+```yaml
+- name: MCP Events conformance test
+  uses: NHTanvir/hookbench@v0.1.0
+  with:
+    url: http://127.0.0.1:3000/mcp
+    headers: |
+      Authorization: Bearer ${{ secrets.MCP_TOKEN }}
+    trigger-url: http://127.0.0.1:3000/dev/emit
+```
+
+It fails the job when a MUST requirement breaks and writes the Markdown report to the job summary. To run the CLI in any other CI system:
 
 ```yaml
 - name: Start the MCP server

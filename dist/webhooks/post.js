@@ -24,7 +24,9 @@ function guardedLookup(allowPrivate) {
             }
             if (opts["all"])
                 return callback(null, usable);
-            const first = usable[0];
+            // One address wanted (Node 18 has no happy-eyeballs fallback): prefer IPv4, as Node did before v17,
+            // so "localhost" reaches a receiver bound to 127.0.0.1 instead of failing on ::1.
+            const first = (usable.find((a) => a.family === 4) ?? usable[0]);
             return callback(null, first.address, first.family);
         });
     });

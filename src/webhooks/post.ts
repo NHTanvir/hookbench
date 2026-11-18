@@ -45,7 +45,9 @@ function guardedLookup(allowPrivate: boolean): LookupFunction {
         return callback(new BlockedAddressError(`${hostname} resolves only to non-public addresses`));
       }
       if (opts["all"]) return callback(null, usable);
-      const first = usable[0] as LookupAddress;
+      // One address wanted (Node 18 has no happy-eyeballs fallback): prefer IPv4, as Node did before v17,
+      // so "localhost" reaches a receiver bound to 127.0.0.1 instead of failing on ::1.
+      const first = (usable.find((a) => a.family === 4) ?? usable[0]) as LookupAddress;
       return callback(null, first.address, first.family);
     });
   }) as LookupFunction;

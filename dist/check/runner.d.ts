@@ -19,6 +19,10 @@ export interface CheckOptions {
     deliveryWaitMs?: number;
     /** Longest a push stream is watched for heartbeats. */
     streamWatchMs?: number;
+    /** heartbeatMs to ask for on events/stream (default 1000). */
+    heartbeatMs?: number;
+    /** How long to watch for deliveries that should not happen, e.g. after events/unsubscribe (default 1500). */
+    settleMs?: number;
     progress?: (line: string) => void;
 }
 export interface RuleResult {

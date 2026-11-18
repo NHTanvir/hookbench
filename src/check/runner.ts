@@ -41,6 +41,10 @@ export interface CheckOptions {
   deliveryWaitMs?: number;
   /** Longest a push stream is watched for heartbeats. */
   streamWatchMs?: number;
+  /** heartbeatMs to ask for on events/stream (default 1000). */
+  heartbeatMs?: number;
+  /** How long to watch for deliveries that should not happen, e.g. after events/unsubscribe (default 1500). */
+  settleMs?: number;
   progress?: (line: string) => void;
 }
 
@@ -154,6 +158,8 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
   const client = new McpEventsClient({ url: opts.url, headers: opts.headers, timeoutMs: opts.timeoutMs ?? 10_000 });
   const deliveryWait = opts.deliveryWaitMs ?? 5000;
   const streamWatch = opts.streamWatchMs ?? 5000;
+  const askHeartbeat = opts.heartbeatMs ?? 1000;
+  const settle = opts.settleMs ?? 1500;
   const report = (): CheckReport => {
     const final = results.final();
     const summary: Record<Status, number> = { pass: 0, fail: 0, warn: 0, skip: 0, info: 0 };
@@ -307,6 +313,11 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
   if (!results.has("list.pagination")) results.pass("list.pagination", pagination);
   if (pageProblems.length > 0) results.violate("list.result", pageProblems.slice(0, 3).join("; "));
   else results.pass("list.result", `${pages.reduce((n, p) => n + (Array.isArray(p.events) ? p.events.length : 0), 0)} event type(s)${profile.resultType ? ', resultType "complete"' : ""}`);
+  if (pages.some((p) => !Array.isArray(p.events))) {
+    // Without an events array there is nothing to subscribe to; grading descriptors would only repeat list.result.
+    results.skipAll(allIds, "events/list did not return an events array");
+    return report();
+  }
 
   const raw = pages.flatMap((p) => (Array.isArray(p.events) ? p.events : []));
   const descProblems: string[] = [];
@@ -492,7 +503,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
   // ---------- push ----------
   if (pushTarget) {
     progress(`events/stream ${pushTarget.name}`);
-    const opened = await attempt(() => client.openStream({ name: pushTarget.name, arguments: {}, cursor: null, heartbeatMs: 1000 }, { connectTimeoutMs: opts.timeoutMs ?? 10_000 }));
+    const opened = await attempt(() => client.openStream({ name: pushTarget.name, arguments: {}, cursor: null, heartbeatMs: askHeartbeat }, { connectTimeoutMs: opts.timeoutMs ?? 10_000 }));
     if (!opened.ok) {
       results.violate("stream.active", `events/stream failed: ${describe(opened.error)}`);
       results.skipAll(["stream.subscription-id", "stream.heartbeat", "stream.occurrence"], "the stream did not open");
@@ -606,7 +617,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
       results.pass("subscribe.requires-auth", `rejected at the HTTP layer with ${unauth.error.status}`);
       authBlocked = !hasCredentials;
     } else if (isCallbackError(unauth.error, profile)) {
-      results.warn("subscribe.requires-auth", `the server tried to verify the callback for an unauthenticated caller (${describe(unauth.error)}); it should answer Forbidden before doing any work`);
+      results.violate("subscribe.requires-auth", `an unauthenticated call got ${describe(unauth.error)}, not Forbidden: the server went as far as contacting the callback for a caller with no principal`);
     } else {
       results.violate("subscribe.requires-auth", `expected Forbidden, got ${describe(unauth.error)}`);
     }
@@ -627,7 +638,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
           else results.violate(id, `${what}: ${e.detail}`);
         }
       };
-      await rejectedAsInvalid("subscribe.rejects-http", "http://hookbench-check.example.com/hook", undefined, "an http:// callback");
+      await rejectedAsInvalid("subscribe.rejects-http", "http://hookbench-check.invalid/hook", undefined, "an http:// callback");
       const badSecrets = ["whsec_dG9vLXNob3J0", "not-a-whsec-secret"];
       await rejectedAsInvalid("subscribe.rejects-bad-secret", callback("bad-secret"), badSecrets[0], `secret "${badSecrets[0]}" (9 bytes)`);
       if (results.status("subscribe.rejects-bad-secret") === "pass") {
@@ -732,10 +743,18 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
         } else if (wellKnownFetched) results.pass("subscribe.verification", [...verifyNotes, "verified through /.well-known/mcp-webhook-receiver.json"].join("; "));
         else results.warn("subscribe.verification", [...verifyNotes, "no verification handshake reached the callback; fine only if this server verifies callbacks another way (allowlist or out-of-band)"].join("; "));
 
+        let currentId = s.id;
         const again = await attempt(() => subscribeTo(cbUrl, { secret, ttlMs: ttlAsked }));
         if (!again.ok) results.violate("subscribe.idempotent", `subscribing again with the same key failed: ${describe(again.error)}`);
-        else if (again.value.id !== s.id) results.violate("subscribe.idempotent", `the same (principal, url, name, arguments) got a new id ${again.value.id} (first ${s.id}); subscribe is an idempotent upsert`);
-        else results.pass("subscribe.idempotent", `same id ${s.id}${again.value.deliveryStatus ? `, deliveryStatus ${JSON.stringify(again.value.deliveryStatus)}` : ""}`);
+        else {
+          if (again.value.id !== s.id) results.violate("subscribe.idempotent", `the same (principal, url, name, arguments) got a new id ${again.value.id} (first ${s.id}); subscribe is an idempotent upsert`);
+          else results.pass("subscribe.idempotent", `same id ${s.id}${again.value.deliveryStatus ? `, deliveryStatus ${JSON.stringify(again.value.deliveryStatus)}` : ""}`);
+          // A client routes by the id it was given last; grade deliveries against that one.
+          if (typeof again.value.id === "string" && again.value.id.length > 0) {
+            currentId = again.value.id;
+            receiver.updateRoute(token, { subscriptionId: currentId });
+          }
+        }
 
         // Deliveries.
         const fired = await fire(t);
@@ -749,9 +768,9 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
           const headerProblems: string[] = [];
           if (missing.length > 0) headerProblems.push(`missing ${missing.join(", ")}`);
           if (!(h["content-type"] ?? "").startsWith("application/json")) headerProblems.push(`Content-Type is ${JSON.stringify(h["content-type"] ?? null)}`);
-          if (h["x-mcp-subscription-id"] !== undefined && h["x-mcp-subscription-id"] !== s.id) headerProblems.push(`X-MCP-Subscription-Id is ${h["x-mcp-subscription-id"]}, but events/subscribe returned ${s.id}`);
+          if (h["x-mcp-subscription-id"] !== undefined && h["x-mcp-subscription-id"] !== currentId) headerProblems.push(`X-MCP-Subscription-Id is ${h["x-mcp-subscription-id"]}, but events/subscribe returned ${currentId}`);
           if (headerProblems.length > 0) results.violate("delivery.headers", headerProblems.join("; "));
-          else results.pass("delivery.headers", `webhook-id, webhook-timestamp, webhook-signature, X-MCP-Subscription-Id ${s.id}`);
+          else results.pass("delivery.headers", `webhook-id, webhook-timestamp, webhook-signature, X-MCP-Subscription-Id ${currentId}`);
 
           const v = delivery.verify;
           if (!v) results.skip("delivery.signature", "the delivery was not verified");
@@ -799,13 +818,15 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
           const shapeProblem = profile.resultType && discovery.era === "modern" && r.resultType !== "complete" ? `; resultType is ${JSON.stringify(r.resultType)}` : "";
           let stopped = "";
           if (trigger) {
-            const before = deliveries.filter((d) => d.kind === "event").length;
+            // Retries of events sent before the unsubscribe may still land; only a new event counts.
+            const eventIdOf = (d: ReceivedDelivery) => (isObject(d.json) && typeof d.json["eventId"] === "string" ? (d.json["eventId"] as string) : d.webhookId);
+            const known = new Set(deliveries.filter((d) => d.kind === "event").map(eventIdOf));
             await fire(t);
-            await sleep(Math.min(1500, deliveryWait));
-            const after = deliveries.filter((d) => d.kind === "event").length;
-            if (after > before) {
-              results.violate("unsubscribe.removes", `events/unsubscribe answered success, but ${after - before} delivery(ies) still arrived afterwards`);
-            } else stopped = "; no delivery arrived after it";
+            await sleep(settle);
+            const late = deliveries.filter((d) => d.kind === "event" && !known.has(eventIdOf(d)));
+            if (late.length > 0) {
+              results.violate("unsubscribe.removes", `events/unsubscribe answered success, but a new event (${eventIdOf(late[0] as ReceivedDelivery)}) was still delivered afterwards`);
+            } else stopped = "; a new event fired afterwards was not delivered";
           }
           if (!results.has("unsubscribe.removes")) {
             if (shapeProblem) results.violate("unsubscribe.removes", `the result is not an empty Result${shapeProblem}`);
@@ -813,8 +834,9 @@ export async function runCheck(opts: CheckOptions): Promise<CheckReport> {
           }
           if (profile.name === "chatgpt") results.skip("unsubscribe.not-found", "OpenAI's guide does not define the error for an unknown subscription");
           else {
-            const again2 = await attempt(() => client.call<JsonObject>(METHODS.unsubscribe, { name: t.name, arguments: {}, delivery: { mode: "webhook", url: cbUrl } }));
-            if (again2.ok) results.violate("unsubscribe.not-found", "unsubscribing the same key a second time succeeded; an unknown key gets NotFound");
+            const neverSubscribed = callback("never-subscribed");
+            const again2 = await attempt(() => client.call<JsonObject>(METHODS.unsubscribe, { name: t.name, arguments: {}, delivery: { mode: "webhook", url: neverSubscribed } }));
+            if (again2.ok) results.violate("unsubscribe.not-found", `unsubscribing a key that was never subscribed (${neverSubscribed}) succeeded; an unknown key gets NotFound`);
             else {
               const e = expectError(again2.error, "NotFound", profile);
               if (e.ok) results.pass("unsubscribe.not-found", e.detail);

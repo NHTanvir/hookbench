@@ -120,7 +120,7 @@ Useful options:
 
 ## How do I run the check in CI?
 
-Use the GitHub Action, [MCP Events Conformance Test (SEP-3415)](../README.md#how-do-i-test-mcp-events-in-ci), after the step that starts your server:
+Use the GitHub Action, [MCP Events Conformance Test (SEP-3415)](https://github.com/marketplace/actions/mcp-events-conformance-test-sep-3415) on the GitHub Marketplace, after the step that starts your server:
 
 ```yaml
 - name: MCP Events conformance test

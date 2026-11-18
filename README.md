@@ -1,6 +1,7 @@
 # Hookbench: test MCP Events (SEP-3415) locally and in CI
 
 [![CI](https://github.com/NHTanvir/hookbench/actions/workflows/ci.yml/badge.svg)](https://github.com/NHTanvir/hookbench/actions/workflows/ci.yml)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-MCP%20Events%20Conformance%20Test-2ea44f?logo=github)](https://github.com/marketplace/actions/mcp-events-conformance-test-sep-3415)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
 [![MCP Events: SEP-3415](https://img.shields.io/badge/MCP%20Events-SEP--3415-6f42c1.svg)](docs/what-is-mcp-events.md)
@@ -15,7 +16,7 @@ That one command runs the whole loop offline. It starts a bundled reference MCP 
 
 ## How do I test MCP Events in CI?
 
-Add the **MCP Events Conformance Test (SEP-3415)** GitHub Action after the step that starts your MCP server. It runs `hookbench check`, which grades 35 conformance rules. It fails the job when a MUST requirement of SEP-3415 breaks, and names the fix for every failure:
+Add the GitHub Action, listed on the Marketplace as [**MCP Events Conformance Test (SEP-3415)**](https://github.com/marketplace/actions/mcp-events-conformance-test-sep-3415), after the step that starts your MCP server. It runs `hookbench check`, which grades 35 conformance rules. It fails the job when a MUST requirement of SEP-3415 breaks, and names the fix for every failure:
 
 ```yaml
 - name: MCP Events conformance test
@@ -370,6 +371,8 @@ No. Everything runs on your machine. `connect` and `check` only talk to the serv
 - Standard Webhooks: [standard-webhooks.md](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md)
 
 What Hookbench was built from, with dates and versions: [docs/RESEARCH.md](docs/RESEARCH.md).
+
+A longer walkthrough, with SEP-3415 and ChatGPT's dialect measured side by side: [MCP Events (SEP-3415): How to Test Your Server](https://naymul.com/test-mcp-events-sep-3415/).
 
 ## Contributing
 

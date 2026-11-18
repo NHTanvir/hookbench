@@ -35,7 +35,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run build && npm run build:test && node --test --test-concurrency=1 build/tests/",
+    "test": "npm run build && npm run build:test && node --test build/tests/*.test.js",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "demo": "node dist/cli.js demo"
   },
